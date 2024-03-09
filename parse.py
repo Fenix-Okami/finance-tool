@@ -17,13 +17,13 @@ def extract_text_from_pdf(pdf_path):
 
         if 'www.bankofamerica.com' in text:
             statement_type='boa'
-            start_idx = text.find("Page 3 of 4")
+            start_idx = text.find("Page 3 of")
             end_idx = text.find("TOTAL PURCHASES AND ADJUSTMENTS", start_idx)
             specific_text = text[start_idx:end_idx] if start_idx != -1 and end_idx != -1 else "Specified text range not found."
 
         if 'www.chase.com' in text:
             statement_type='chase'
-            start_idx = text.find("Page2 of 3")
+            start_idx = text.find("Page2 of")
             end_idx = text.find("Total fees charged", start_idx)
             specific_text = text[start_idx:end_idx] if start_idx != -1 and end_idx != -1 else "Specified text range not found."
         
@@ -85,7 +85,6 @@ def update_year(row):
     return transaction_date.date()
 
     
-
 def process_all_pdfs_in_folder(folder_path):
     all_files = glob.glob(folder_path + '/**/*.pdf', recursive=True)  # Modified to search subdirectories
     all_dfs = []
