@@ -4,6 +4,10 @@ import PyPDF2
 import glob
 import os
 from datetime import datetime
+import hashlib
+
+from openai import OpenAI
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 def extract_text_from_pdf(pdf_path):
     with open(pdf_path, 'rb') as file:
@@ -57,6 +61,7 @@ def parse_bank_statement(pdf_path):
         df=parse_chase_statement(text)
         df['Source File'] = filename
         df['Source Directory'] = card_type
+        df['Hash'] = df.apply(lambda row: hashlib.sha256(f"{row['Transaction Date']}{row['Description']}{row['Amount']}{row['Source File']}".encode()).hexdigest(), axis=1)
         return df
 
 def update_year(row):
@@ -93,8 +98,36 @@ def process_all_pdfs_in_folder(folder_path):
         all_dfs.append(df)
     final_df = pd.concat(all_dfs, ignore_index=True)
     final_df['Transaction Date'] = final_df.apply(update_year, axis=1)
+    final_df=final_df[final_df['Amount']>0]
+    df.drop('Posting Date', axis=1, inplace=True)
+    final_df['Hash'] = final_df.apply(lambda row: hashlib.sha256(f"{row['Transaction Date']}{row['Description']}{row['Amount']}{row['Source File']}".encode()).hexdigest(), axis=1)
+    final_df = final_df[['Hash','Source File','Transaction Date','Description', 'Amount']]
+    final_df = final_df.sort_values(by=['Transaction Date','Description', 'Amount'], ascending=True)
+    # final_df = final_df.head(100)
+    # for index, row in final_df.iterrows():
+    #     description = row['Description']
+    #     classification = classify_description(description)
+    #     print(f"Description: {description} -> Classification: {classification}")
+    #     # Update your DataFrame with the classification result as needed
+    #     final_df.at[index, 'Category'] = classification
 
     return final_df
+
+def classify_description(description):
+    main_categories = ['Utilities', 'Food', 'Transport', 'Entertainment']
+    subcategories = {
+        'Utilities': ['Electricity', 'Internet'],
+        'Food': ['Restaurant', 'Groceries'],
+        'Transport': ['Public Transport', 'Ride Share', 'Fuel'],
+        'Entertainment': ['Movies', 'Concerts', 'Streaming Services']
+    }
+    
+    response = client.completions.create(
+        model="gpt-3.5-turbo-instruct",
+        prompt=f"Classify the following transaction description into the categories {main_categories} and subcategories {subcategories}: '{description}'. Provide the main category and subcategory."
+        )
+    print(response)
+    return response.choices[0].text.strip()
 
 if __name__=='__main__':
     folder_path = 'statements'  # Base folder containing subfolders for Visa and Mastercard
