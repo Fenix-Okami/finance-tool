@@ -19,19 +19,23 @@ def extract_text_from_pdf(pdf_path):
             except:
                 pass
 
+        # Initialize default values
+        specific_text = text  # Default to full text if no specific extraction is found
+        statement_type = 'unknown'  # Default statement type
+
         if 'www.bankofamerica.com' in text:
-            statement_type='boa'
+            statement_type = 'boa'
             start_idx = text.find("Page 3 of")
             end_idx = text.find("TOTAL PURCHASES AND ADJUSTMENTS", start_idx)
             specific_text = text[start_idx:end_idx] if start_idx != -1 and end_idx != -1 else "Specified text range not found."
 
-        if 'www.chase.com' in text:
-            statement_type='chase'
+        elif 'www.chase.com' in text:
+            statement_type = 'chase'
             start_idx = text.find("Page2 of")
             end_idx = text.find("Total fees charged", start_idx)
             specific_text = text[start_idx:end_idx] if start_idx != -1 and end_idx != -1 else "Specified text range not found."
         
-    return specific_text,statement_type
+    return specific_text, statement_type
 
 def parse_chase_statement(text):
     # Simplified parsing based on the Chase statement's format
@@ -46,8 +50,9 @@ def parse_chase_statement(text):
 def parse_bank_statement(pdf_path):
     filename = os.path.basename(pdf_path)
     card_type = os.path.basename(os.path.dirname(pdf_path))  # Extracts the folder name directly containing the file
-    text,statement_type = extract_text_from_pdf(pdf_path)
-    if statement_type=='boa':
+    text, statement_type = extract_text_from_pdf(pdf_path)
+    
+    if statement_type == 'boa':
         transaction_pattern = re.compile(r'(\d{2}/\d{2})\s(\d{2}/\d{2})\s([\w\s\.\*\-]+?)\s(\d{4})\s(\d{4})\s(-?\d+\.\d{2})')
         transactions = transaction_pattern.findall(text)
         df_columns = ['Transaction Date', 'Posting Date', 'Description', 'Reference Number', 'Account Number', 'Amount', 'Source File', 'Source Directory']
@@ -57,12 +62,16 @@ def parse_bank_statement(pdf_path):
         df = df[['Transaction Date', 'Posting Date', 'Description', 'Amount', 'Source File', 'Source Directory']]
         df['Amount'] = pd.to_numeric(df['Amount'])
         return df
-    if statement_type=='chase':
-        df=parse_chase_statement(text)
+    elif statement_type == 'chase':
+        df = parse_chase_statement(text)
         df['Source File'] = filename
         df['Source Directory'] = card_type
         df['Hash'] = df.apply(lambda row: hashlib.sha256(f"{row['Transaction Date']}{row['Description']}{row['Amount']}{row['Source File']}".encode()).hexdigest(), axis=1)
         return df
+    else:
+        # Return an empty DataFrame with the expected columns for unknown statement types
+        print(f"Warning: Unknown statement type '{statement_type}' for file {pdf_path}")
+        return pd.DataFrame(columns=['Transaction Date', 'Description', 'Amount', 'Source File', 'Source Directory'])
 
 def update_year(row):
     # Match both filename patterns
@@ -95,11 +104,20 @@ def process_all_pdfs_in_folder(folder_path):
     all_dfs = []
     for pdf_file in all_files:
         df = parse_bank_statement(pdf_file)
-        all_dfs.append(df)
+        if df is not None and not df.empty:
+            all_dfs.append(df)
+    
+    if not all_dfs:
+        print("No valid transactions found in any PDF files.")
+        return pd.DataFrame()
+    
     final_df = pd.concat(all_dfs, ignore_index=True)
     final_df['Transaction Date'] = final_df.apply(update_year, axis=1)
-    final_df=final_df[final_df['Amount']>0]
-    df.drop('Posting Date', axis=1, inplace=True)
+    
+    # Drop 'Posting Date' column if it exists
+    if 'Posting Date' in final_df.columns:
+        final_df.drop('Posting Date', axis=1, inplace=True)
+    
     final_df['Hash'] = final_df.apply(lambda row: hashlib.sha256(f"{row['Transaction Date']}{row['Description']}{row['Amount']}{row['Source File']}".encode()).hexdigest(), axis=1)
     final_df = final_df[['Hash','Source File','Transaction Date','Description', 'Amount']]
     final_df = final_df.sort_values(by=['Transaction Date','Description', 'Amount'], ascending=True)
@@ -130,7 +148,7 @@ def classify_description(description):
     return response.choices[0].text.strip()
 
 if __name__=='__main__':
-    folder_path = 'statements'  # Base folder containing subfolders for Visa and Mastercard
+    folder_path = 'Statements'  # Base folder containing subfolders for Visa and Mastercard
     final_transactions_df = process_all_pdfs_in_folder(folder_path)
 
     if not os.path.exists('output'):
